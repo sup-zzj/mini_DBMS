@@ -15,6 +15,7 @@ from .client import (
     OpenAICompatClient,
     create_client,
 )
+from .advisor import Advice, advise
 
 __all__ = [
     "LLMClient",
@@ -22,4 +23,6 @@ __all__ = [
     "MockLLMClient",
     "OpenAICompatClient",
     "create_client",
+    "Advice",
+    "advise",
 ]
