@@ -39,9 +39,9 @@ def run_nl(engine: StorageEngine, exec_: Executor, client: LLMClient, text: str)
     return exec_.execute(ast)
 
 
-def run_advise(client: LLMClient, workload: str) -> str:
-    """Workload description -> index suggestion text."""
-    adv = advise(client, workload)
+def run_advise(engine: StorageEngine, client: LLMClient, workload: str) -> str:
+    """Workload description -> index suggestion text (data-aware)."""
+    adv = advise(client, workload, engine=engine)
     tag = " [兜底判定]" if adv.fallback else ""
     hint = f"\n{_LEARNED_HINT}" if adv.index_type == "learned" else ""
     return f"建议索引类型：{adv.index_type}{tag}\n理由：{adv.reason}{hint}"

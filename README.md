@@ -221,7 +221,7 @@ Kraska 等人（SIGMOD 2018）主张用"预测位置 + 小范围搜索"的模型
 
 1. **NL→SQL**：`NL 查询 users 的所有用户` 自然语言生成 mini_SQL，经 `frontend` 语法护栏验证后执行；提示词注入实时 schema（表/列/类型/索引）降低幻觉。非法 SQL 直接拒绝、不执行。
 2. **SQL 辅助调优**：`TUNE [results/index_benchmark.json]` 把实验产物喂给 LLM，生成"为何该索引方案在此数据分布下最优"的解读；Mock 后端退化为数据驱动模板，离线可演示。
-3. **数据分布感知的索引选择器**：`ADVISE 大量点查 user id` 让 LLM 按工作负载建议 `btree / learned / none`，结合实验负面结论输出诚实提示（learned 约慢 2.2×）。
+3. **数据分布感知的索引选择器**：`ADVISE 大量点查 user id` 把**真实库统计**（表/列/行数/已有索引）与**实验基准实测数字**（查询耗时、内存）注入提示词，让 LLM 基于数据与实测证据给出 `btree / learned / none` 建议，并结合负面结论输出诚实提示（learned 约慢 2.2×）。
 
 **双后端**（`llm/client.py`）：
 

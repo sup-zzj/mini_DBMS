@@ -103,7 +103,7 @@ def main(argv=None) -> int:
             continue
         if low == "advise" or low.startswith("advise "):
             try:
-                print(llm_cli.run_advise(client, line[len("advise"):].strip()))
+                print(llm_cli.run_advise(engine, client, line[len("advise"):].strip()))
             except LLMError as exc:
                 print(f"错误: {exc}")
             continue

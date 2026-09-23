@@ -64,10 +64,17 @@ class MockLLMClient(LLMClient):
                 return f"SELECT * FROM {m.group(1)} LIMIT 10"
             return ""
         if "[ADVISE]" in system:
-            low = user.lower()
-            if any(k in low for k in ("insert", "update", "delete")) or "写" in user:
+            # The user prompt now embeds catalog stats and benchmark facts
+            # (may contain insert/update/learned/写 ...).  Only the workload
+            # segment after the "工作负载：" marker drives keyword matching.
+            marker = "工作负载："
+            if marker in user:
+                low = user.split(marker, 1)[1].lower()
+            else:
+                low = user.lower()
+            if any(k in low for k in ("insert", "update", "delete")) or "写" in low:
                 return '{"index_type": "none", "reason": "写多读少，索引维护成本高"}'
-            if "learned" in low or "只读" in user or "批量" in user:
+            if "learned" in low or "只读" in low or "批量" in low:
                 return '{"index_type": "learned", "reason": "只读批量扫描适合学习式索引"}'
             return '{"index_type": "btree", "reason": "点查/范围/排序场景，B+ 树更稳"}'
         return ""

@@ -43,7 +43,7 @@ def test_run_nl_rejects_empty_reply(tmp_path):
 
 def test_run_advise_text(tmp_path):
     engine = _engine(tmp_path)
-    text = run_advise(MockLLMClient(), "大量点查 user id")
+    text = run_advise(engine, MockLLMClient(), "大量点查 user id")
     assert "btree" in text
     engine.close()
 
