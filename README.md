@@ -17,7 +17,7 @@
 - [实验与解读](#实验与解读)
 - [复现约定](#复现约定)
 - [已知局限](#已知局限)
-- [Phase 2：LLM 结合（预告）](#phase-2llm-结合预告)
+- [Phase 2：LLM 结合](#phase-2llm-结合)
 - [参考资料](#参考资料)
 
 ---
@@ -37,6 +37,7 @@
 | 编排 | `storage_engine.py` | DDL / DML / 事务 / 崩溃恢复 / checkpoint 全链路 |
 | 前端 | `frontend/` | 手写 tokenizer + 递归下降 parser + executor；`app.py` 为 REPL |
 | 实验 | `scripts/` | 三组基准 + 崩溃恢复演示 + 出图（PNG/PDF） |
+| LLM 自然语言接口 | `llm/` 包：NL→SQL（语法护栏）、ADVISE 索引选型、TUNE 调优解读；Mock / OpenAI 兼容双后端 |
 
 ---
 
@@ -214,15 +215,24 @@ Kraska 等人（SIGMOD 2018）主张用"预测位置 + 小范围搜索"的模型
 
 ---
 
-## Phase 2：LLM 结合（预告）
+## Phase 2：LLM 结合
 
-本项目规划了第二阶段——**LLM 增强数据库**，本期不实现：
+在引擎之上新增一层 **LLM 自然语言接口**（`llm/` 包），三块能力：
 
-1. **NL→SQL**：自然语言查询经 LLM 生成 mini_SQL，再走本引擎执行；通过 `describe`/目录元数据做 schema-aware 提示，降低幻觉。
-2. **SQL 辅助调优**：把 `results/*.json` 的实验产物喂给 LLM，让它生成"为何该索引方案在此数据分布下最优"的解读文案（沉淀到 README 或报告）。
-3. **数据分布感知的索引选择器**：用 LLM 描述工作负载特征 → 提示引擎选 B+ 树还是学习式索引（结合实验 1 的负面结论做约束）。
+1. **NL→SQL**：`NL 查询 users 的所有用户` 自然语言生成 mini_SQL，经 `frontend` 语法护栏验证后执行；提示词注入实时 schema（表/列/类型/索引）降低幻觉。非法 SQL 直接拒绝、不执行。
+2. **SQL 辅助调优**：`TUNE [results/index_benchmark.json]` 把实验产物喂给 LLM，生成"为何该索引方案在此数据分布下最优"的解读；Mock 后端退化为数据驱动模板，离线可演示。
+3. **数据分布感知的索引选择器**：`ADVISE 大量点查 user id` 让 LLM 按工作负载建议 `btree / learned / none`，结合实验负面结论输出诚实提示（learned 约慢 2.2×）。
 
-该阶段的核心价值是把"引擎能力"与"LLM 判断"解耦：引擎仍是确定性的、可测试的；LLM 只做模式识别与自然语言接口，不进入存储正确性路径。
+**双后端**（`llm/client.py`）：
+
+| 后端 | 触发条件 | 用途 |
+| --- | --- | --- |
+| Mock（确定性） | 未设置 `MINI_DBMS_API_KEY` | 测试、离线演示，零网络零 key |
+| OpenAI 兼容 | 设置 `MINI_DBMS_API_KEY` | 接 DeepSeek / Qwen 等，`base_url`/`model` 可配 |
+
+环境变量：`MINI_DBMS_API_BASE`（默认 `https://api.deepseek.com`）、`MINI_DBMS_API_KEY`、`MINI_DBMS_MODEL`（默认 `deepseek-chat`）。
+
+**边界声明**：LLM 只做模式识别与自然语言接口，**不进入存储正确性路径**——引擎保持确定性、可测试；LLM 输出经 `frontend` 解析器验证后才执行，非法输入拒绝并回显原文。
 
 ---
 
