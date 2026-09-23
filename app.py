@@ -21,6 +21,9 @@ from frontend.executor import Executor
 from frontend.parser import ParseError, Parser
 from frontend.tokenizer import tokenize
 
+from llm.client import LLMError, create_client
+from llm import cli as llm_cli
+
 BANNER = r"""
 mini_DBMS — 学习型存储引擎（B+树 / WAL 事务 / 缓冲池 / 学习式索引）
 输入 SQL 语句，一行一条；exit / quit / \q 退出。
@@ -71,8 +74,9 @@ def main(argv=None) -> int:
         return 1
 
     exec_ = Executor(engine)
+    client = create_client()
     print(BANNER)
-    print(f"数据目录: {os.path.abspath(args.data_dir)}  缓冲池: {args.pool_size} 页  策略: {args.policy}")
+    print(f"数据目录: {os.path.abspath(args.data_dir)}  缓冲池: {args.pool_size} 页  策略: {args.policy}  LLM 后端: {client.name}")
     print("输入 help 查看支持的语句。\n")
 
     while True:
@@ -89,6 +93,27 @@ def main(argv=None) -> int:
         if low in ("help", "\\?"):
             print(_HELP)
             continue
+        if low.startswith("nl "):
+            try:
+                result = llm_cli.run_nl(engine, exec_, client, line[3:].strip())
+            except (LLMError, ValueError, KeyError) as exc:
+                print(f"错误: {exc}")
+            else:
+                _render(result)
+            continue
+        if low == "advise" or low.startswith("advise "):
+            try:
+                print(llm_cli.run_advise(client, line[len("advise"):].strip()))
+            except LLMError as exc:
+                print(f"错误: {exc}")
+            continue
+        if low == "tune" or low.startswith("tune "):
+            try:
+                path = line[len("tune"):].strip() or _latest_results_json()
+                print(llm_cli.run_tune(client, path))
+            except (LLMError, FileNotFoundError, ValueError) as exc:
+                print(f"错误: {exc}")
+            continue
         try:
             ast = Parser(tokenize(line)).parse()
             result = exec_.execute(ast)
@@ -102,6 +127,23 @@ def main(argv=None) -> int:
     return 0
 
 
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+
+def _latest_results_json() -> str:
+    """Path of the most recently modified results/*.json."""
+    base = os.path.join(_REPO_ROOT, "results")
+    if not os.path.isdir(base):
+        raise FileNotFoundError("results/ 目录不存在")
+    jsons = sorted(
+        (os.path.join(base, f) for f in os.listdir(base) if f.endswith(".json")),
+        key=os.path.getmtime,
+    )
+    if not jsons:
+        raise FileNotFoundError("results/ 下没有 .json 文件")
+    return jsons[-1]
+
+
 _HELP = """支持的语句：
   CREATE TABLE t (id INT PRIMARY KEY, name TEXT, score REAL)
   CREATE INDEX idx ON t (col)
@@ -113,6 +155,9 @@ _HELP = """支持的语句：
   DELETE FROM t WHERE col op value
   BEGIN / COMMIT / ROLLBACK
   SHOW TABLES / DESCRIBE t
+  NL 查询 users 的所有用户           # 自然语言 → SQL → 执行（LLM 后端）
+  ADVISE 大量点查 user id            # 数据分布感知的索引选择建议
+  TUNE [results/x.json]             # 实验调优解读（默认取 results/ 下最新 json）
 op: = != < <= > >=   注释: # 到行尾   字符串: '...' 或 "..."（双引号转义）"""
 
 
