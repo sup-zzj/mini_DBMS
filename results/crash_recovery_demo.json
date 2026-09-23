@@ -1,0 +1,27 @@
+{
+  "committed_ids": [
+    1,
+    2,
+    3
+  ],
+  "uncommitted_ids": [
+    4,
+    5
+  ],
+  "before_crash": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "after_recovery": [
+    1,
+    2,
+    3
+  ],
+  "committed_survived": true,
+  "uncommitted_lost": true,
+  "indexes_consistent": true,
+  "all_checks_passed": true
+}
