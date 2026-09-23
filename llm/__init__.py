@@ -16,6 +16,7 @@ from .client import (
     create_client,
 )
 from .advisor import Advice, advise
+from .tuning import tune
 
 __all__ = [
     "LLMClient",
@@ -25,4 +26,5 @@ __all__ = [
     "create_client",
     "Advice",
     "advise",
+    "tune",
 ]
