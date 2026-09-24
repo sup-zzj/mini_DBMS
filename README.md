@@ -46,7 +46,7 @@
 ```bash
 pip install -r requirements.txt
 
-# 1) 单元测试（41 个，含 B+ 树 fuzz、WAL 损坏恢复、事务回滚、崩溃恢复）
+# 1) 单元测试（71 个，含 B+ 树 fuzz、WAL 损坏恢复、事务回滚、崩溃恢复、LLM 层双后端/护栏/选型/调优）
 python -m pytest
 
 # 2) 进入 REPL，用 SQL 操作数据库
@@ -74,7 +74,12 @@ python scripts/make_plots.py            # 出版级图表 -> figures/*.png + *.p
 ## 架构
 
 ```
-                 +---------------------------+
+ +---------------------------------------------------+
+ |  llm/  NL→SQL（经 frontend 护栏）· ADVISE · TUNE   |
+ |  Mock / OpenAI 兼容双后端（不进存储正确性路径）      |
+ +------------------------+--------------------------+
+                           |  app.py（REPL）路由
+                 +---------v-----------+
                  |  frontend/  tokenizer · parser · executor · REPL  |
                  +-------------+-------------+
                                |  mini_SQL AST
@@ -184,8 +189,8 @@ Kraska 等人（SIGMOD 2018）主张用"预测位置 + 小范围搜索"的模型
 **解读**：
 
 1. **Clock 用一个参考位逼近 LRU**：全程差距 ≤ 0.5 个百分点，这是经典结论——CLOCK 的工程意义在于 O(1) 开销近似 LRU。
-2. **Random 是显著下限**：比 LRU 低 4~5 个百分点。
-3. **离线最优与在线策略的差距就是信息差**：OPT 比 LRU 高约 10 个百分点（小容量时）。所有策略在 100% 容量处收敛（只剩每页首次访问的 compulsory miss）。
+2. **Random 是显著下限**：比 LRU 低约 3~5 个百分点（容量越小差距越大，5% 容量时达 5.4pp）。
+3. **离线最优与在线策略的差距就是信息差**：OPT 比 LRU 高 15~17 个百分点（5%~20% 小容量时），容量增大后收窄到约 10pp（50% 时）；所有策略在 100% 容量处收敛（只剩每页首次访问的 compulsory miss）。
 4. 结论：在偏斜负载下，**容量比策略重要得多**——把缓冲池从 5% 加到 10% 带来的提升（+8.6pp）远大于换掉 LRU（+5.4pp）。
 
 ### 实验 3：崩溃恢复演示（`crash_recovery_demo.py`）
@@ -233,6 +238,34 @@ Kraska 等人（SIGMOD 2018）主张用"预测位置 + 小范围搜索"的模型
 环境变量：`MINI_DBMS_API_BASE`（默认 `https://api.deepseek.com`）、`MINI_DBMS_API_KEY`、`MINI_DBMS_MODEL`（默认 `deepseek-chat`）。
 
 **边界声明**：LLM 只做模式识别与自然语言接口，**不进入存储正确性路径**——引擎保持确定性、可测试；LLM 输出经 `frontend` 解析器验证后才执行，非法输入拒绝并回显原文。
+
+### Mock 模式快速演示
+
+默认**未设置** `MINI_DBMS_API_KEY` 时走 **Mock 后端**（确定性、零网络零 key），以下会话可直接照做：
+
+```text
+mini_db> CREATE TABLE users (id INT PRIMARY KEY, name TEXT, score REAL);
+已创建表 users
+mini_db> INSERT INTO users VALUES (1, 'alice', 9.5);
+已插入 1 行
+mini_db> INSERT INTO users VALUES (2, 'bob', 7.0);
+已插入 1 行
+mini_db> NL 查询 users 的所有用户
+id | name  | score
+---+-------+------
+1  | alice | 9.5
+2  | bob   | 7.0
+共 2 行
+mini_db> ADVISE 大量点查 user id
+建议索引类型：btree
+理由：点查/范围/排序场景，B+ 树更稳
+mini_db> TUNE results/index_benchmark.json
+综合 sorted_array 的 lookup_ns=1793.3 最小，是当前实验中最快的查找方案。
+内存占用 0.76 MB，构建耗时 0.00s。
+解读：索引选型是 算法复杂度 × 常数因子 × 内存代价 的权衡；该结论与 README 实验解读一致。
+```
+
+> 说明：Mock 的 `NL` 只识别"表 表名 + 查询/select"模式，生成 `SELECT * FROM <表> LIMIT 10`；`ADVISE` 只按工作负载关键词在 btree / learned / none 间选择（数据感知提示词照常注入）；`TUNE` 退化为数据驱动模板。设置 `MINI_DBMS_API_KEY` 后同一会话即切换到 OpenAI 兼容真实后端（`base_url`/`model` 可用环境变量配置）。
 
 ---
 
