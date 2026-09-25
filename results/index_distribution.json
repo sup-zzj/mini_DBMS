@@ -1,0 +1,219 @@
+{
+  "meta": {
+    "n_keys": 100000,
+    "n_queries": 50000,
+    "seed": 42,
+    "btree_order": 32,
+    "learned_level1": 64,
+    "key_space": 281474976710656
+  },
+  "per_dist": [
+    {
+      "distribution": "uniform",
+      "variants": [
+        {
+          "name": "sorted_array",
+          "build_s": 0.0,
+          "lookup_ns": 2678.1,
+          "present_ns": 1350.1,
+          "absent_ns": 1318.5,
+          "memory_bytes": 800000,
+          "memory_mb": 0.763
+        },
+        {
+          "name": "btree",
+          "build_s": 0.1367,
+          "lookup_ns": 1916.5,
+          "present_ns": 2132.6,
+          "absent_ns": 1993.7,
+          "memory_bytes": 2552744,
+          "memory_mb": 2.434,
+          "nodes": 6638,
+          "height": 4
+        },
+        {
+          "name": "learned_e16",
+          "build_s": 0.897,
+          "lookup_ns": 2339.7,
+          "present_ns": 2422.6,
+          "absent_ns": 2400.4,
+          "memory_bytes": 809936,
+          "memory_mb": 0.772,
+          "model_bytes": 9936,
+          "pieces": 349,
+          "error": {
+            "max": 17,
+            "mean": 5.898,
+            "p50": 5,
+            "p90": 12,
+            "p99": 15,
+            "over_threshold_frac": 0.0
+          }
+        },
+        {
+          "name": "learned_block",
+          "build_s": 0.895,
+          "lookup_ns": 3155.6,
+          "present_ns": 3305.0,
+          "absent_ns": 3308.1,
+          "memory_bytes": 822440,
+          "memory_mb": 0.784,
+          "model_bytes": 22440,
+          "pieces": 349,
+          "block_size": 64,
+          "block_extra": 2,
+          "error": {
+            "max": 17,
+            "mean": 5.898,
+            "p50": 5,
+            "p90": 12,
+            "p99": 15,
+            "over_threshold_frac": 0.0
+          },
+          "block_error": {
+            "block_error_max": 1,
+            "block_over_frac": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "distribution": "clustered",
+      "variants": [
+        {
+          "name": "sorted_array",
+          "build_s": 0.0,
+          "lookup_ns": 1339.2,
+          "present_ns": 1384.4,
+          "absent_ns": 1249.8,
+          "memory_bytes": 800000,
+          "memory_mb": 0.763
+        },
+        {
+          "name": "btree",
+          "build_s": 0.1314,
+          "lookup_ns": 1537.2,
+          "present_ns": 1997.9,
+          "absent_ns": 1032.0,
+          "memory_bytes": 2552744,
+          "memory_mb": 2.434,
+          "nodes": 6638,
+          "height": 4
+        },
+        {
+          "name": "learned_e16",
+          "build_s": 0.8857,
+          "lookup_ns": 2297.4,
+          "present_ns": 2425.1,
+          "absent_ns": 2344.3,
+          "memory_bytes": 812072,
+          "memory_mb": 0.774,
+          "model_bytes": 12072,
+          "pieces": 438,
+          "error": {
+            "max": 17,
+            "mean": 3.091,
+            "p50": 1,
+            "p90": 9,
+            "p99": 14,
+            "over_threshold_frac": 0.0
+          }
+        },
+        {
+          "name": "learned_block",
+          "build_s": 0.8652,
+          "lookup_ns": 3272.3,
+          "present_ns": 3335.5,
+          "absent_ns": 3147.3,
+          "memory_bytes": 824576,
+          "memory_mb": 0.786,
+          "model_bytes": 24576,
+          "pieces": 438,
+          "block_size": 64,
+          "block_extra": 2,
+          "error": {
+            "max": 17,
+            "mean": 3.091,
+            "p50": 1,
+            "p90": 9,
+            "p99": 14,
+            "over_threshold_frac": 0.0
+          },
+          "block_error": {
+            "block_error_max": 1,
+            "block_over_frac": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "distribution": "zipf",
+      "variants": [
+        {
+          "name": "sorted_array",
+          "build_s": 0.0,
+          "lookup_ns": 1350.0,
+          "present_ns": 1443.2,
+          "absent_ns": 1280.8,
+          "memory_bytes": 800000,
+          "memory_mb": 0.763
+        },
+        {
+          "name": "btree",
+          "build_s": 0.1435,
+          "lookup_ns": 1472.3,
+          "present_ns": 2035.4,
+          "absent_ns": 966.4,
+          "memory_bytes": 2552744,
+          "memory_mb": 2.434,
+          "nodes": 6638,
+          "height": 4
+        },
+        {
+          "name": "learned_e16",
+          "build_s": 0.8818,
+          "lookup_ns": 2306.1,
+          "present_ns": 2400.6,
+          "absent_ns": 2275.7,
+          "memory_bytes": 816872,
+          "memory_mb": 0.779,
+          "model_bytes": 16872,
+          "pieces": 638,
+          "error": {
+            "max": 17,
+            "mean": 5.575,
+            "p50": 5,
+            "p90": 11,
+            "p99": 15,
+            "over_threshold_frac": 0.0
+          }
+        },
+        {
+          "name": "learned_block",
+          "build_s": 0.8873,
+          "lookup_ns": 3158.9,
+          "present_ns": 3261.6,
+          "absent_ns": 3028.6,
+          "memory_bytes": 829376,
+          "memory_mb": 0.791,
+          "model_bytes": 29376,
+          "pieces": 638,
+          "block_size": 64,
+          "block_extra": 2,
+          "error": {
+            "max": 17,
+            "mean": 5.575,
+            "p50": 5,
+            "p90": 11,
+            "p99": 15,
+            "over_threshold_frac": 0.0
+          },
+          "block_error": {
+            "block_error_max": 1,
+            "block_over_frac": 0.0
+          }
+        }
+      ]
+    }
+  ]
+}

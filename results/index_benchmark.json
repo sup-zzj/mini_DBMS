@@ -11,18 +11,18 @@
     {
       "name": "sorted_array",
       "build_s": 0.0,
-      "lookup_ns": 1793.3,
-      "present_ns": 1854.6,
-      "absent_ns": 1451.8,
+      "lookup_ns": 1275.0,
+      "present_ns": 1272.8,
+      "absent_ns": 1324.8,
       "memory_bytes": 800000,
       "memory_mb": 0.763
     },
     {
       "name": "btree",
-      "build_s": 0.2129,
-      "lookup_ns": 3484.6,
-      "present_ns": 3484.3,
-      "absent_ns": 2517.0,
+      "build_s": 0.1347,
+      "lookup_ns": 1838.3,
+      "present_ns": 1891.6,
+      "absent_ns": 1635.5,
       "memory_bytes": 2552744,
       "memory_mb": 2.434,
       "nodes": 6638,
@@ -30,10 +30,10 @@
     },
     {
       "name": "learned_e16",
-      "build_s": 1.8007,
-      "lookup_ns": 3867.8,
-      "present_ns": 3750.0,
-      "absent_ns": 3498.7,
+      "build_s": 0.8989,
+      "lookup_ns": 2401.1,
+      "present_ns": 2482.2,
+      "absent_ns": 2327.1,
       "memory_bytes": 809936,
       "memory_mb": 0.772,
       "model_bytes": 9936,
@@ -42,21 +42,21 @@
   ],
   "threshold_sweep": {
     "4": {
-      "lookup_ns": 3970.4,
+      "lookup_ns": 2488.2,
       "memory_bytes": 886472,
       "model_bytes": 86472,
       "memory_mb": 0.845,
       "pieces": 3538
     },
     "16": {
-      "lookup_ns": 3757.0,
+      "lookup_ns": 2296.7,
       "memory_bytes": 809936,
       "model_bytes": 9936,
       "memory_mb": 0.772,
       "pieces": 349
     },
     "64": {
-      "lookup_ns": 4146.3,
+      "lookup_ns": 2681.1,
       "memory_bytes": 803168,
       "model_bytes": 3168,
       "memory_mb": 0.766,

@@ -33,10 +33,10 @@
 | 存储 | `table.py` | slotted page 堆表；紧凑二进制行编码；墓碑删除（保留 offset 便于 undo 原位恢复） |
 | 目录 | `catalog.py` | 表/列/索引元数据（JSON 持久化） |
 | 索引 | `btree.py` | B+ 树，可插拔 NodeStore（内存 dict / 序列化进 4KB 页）；分裂、墓碑删除、叶内压缩 |
-| 学习式 | `learned_index.py` | 两级 RMI（Recursive Model Index）：等分路由 + 贪心分段线性拟合 + 误差界内精确搜索；静态只读 |
+| 学习式 | `learned_index.py` | 两级 RMI（Recursive Model Index）：等分路由 + 贪心分段线性拟合 + 误差界内精确搜索；gap key 自动回退段内二分，任意 key 精确；含 `BlockLearnedIndex` 页路由变体；静态只读 |
 | 编排 | `storage_engine.py` | DDL / DML / 事务 / 崩溃恢复 / checkpoint 全链路 |
 | 前端 | `frontend/` | 手写 tokenizer + 递归下降 parser + executor；`app.py` 为 REPL |
-| 实验 | `scripts/` | 三组基准 + 崩溃恢复演示 + 出图（PNG/PDF） |
+| 实验 | `scripts/` | 五组基准（索引对比 / 分布敏感性 / 页路由 / 缓冲池 / 崩溃恢复）+ 出图（PNG/PDF） |
 | LLM 自然语言接口 | `llm/` 包：NL→SQL（语法护栏）、ADVISE 索引选型、TUNE 调优解读；Mock / OpenAI 兼容双后端 |
 
 ---
@@ -59,7 +59,9 @@ python app.py --data-dir ./db
 #   SHOW TABLES; DESCRIBE users;   (输入 exit / quit / \q 退出)
 
 # 3) 复现实验
-python scripts/run_benchmarks.py        # 索引对比实验 -> results/index_benchmark.json
+python scripts/run_benchmarks.py                     # 实验1 索引对比 -> results/index_benchmark.json
+python scripts/run_benchmarks.py --distribution uniform clustered zipf   # 实验4 分布敏感性 -> results/index_distribution.json
+python scripts/run_benchmarks.py --block-sizes 32 64 128 256            # 实验5 页路由 -> results/index_block.json
 python scripts/bench_buffer.py          # 缓冲池替换策略实验 -> results/buffer_pool_benchmark.json
 python scripts/crash_recovery_demo.py   # 崩溃恢复演示 -> results/crash_recovery_demo.json
 python scripts/make_plots.py            # 出版级图表 -> figures/*.png + *.pdf
@@ -198,6 +200,41 @@ Kraska 等人（SIGMOD 2018）主张用"预测位置 + 小范围搜索"的模型
 提交事务 A（插入 3 行）→ 开启事务 B（再插 2 行）→ `discard()` 模拟进程崩溃（**不 flush、关句柄**）→ 重开数据库。
 
 结果：恢复后磁盘上只剩 A 的 3 行；B 的 2 行既不在堆表也不在任何索引中；主键索引与二级索引与堆表完全一致。**这验证了 no-steal/no-force + WAL redo + 索引全量重建的端到端正确性。**
+
+### 实验 4：数据分布敏感性（`run_benchmarks.py --distribution ...`）
+
+设定：同样的 `seed=42 / N=100_000 / Q=50_000`，但数据集换成三种可复现的 key 分布（`scripts/keygen.py`）：**uniform**（均匀）、**clustered**（低熵聚簇，贴近"频繁访问区间"的真实数据）、**zipf**（偏斜）。核心观测对象：① 查询延迟是否随分布改变；② 模型复杂度（线性段数）如何响应数据熵。
+
+| 分布 | pieces（E=16） | learned 延迟 ns | learned_block 延迟 ns | 预测误差 max | 误差越界率 |
+|---|---|---|---|---|---|
+| uniform | 349 | 2340 | 3156 | 17 | **0.0** |
+| clustered | 438 | 2297 | 3272 | 17 | **0.0** |
+| zipf | 638 | 2306 | 3159 | 17 | **0.0** |
+
+**解读（正确性修复 + 诚实负面结论）**：
+
+1. **先修了一个真实 bug，再做实验**。第一版 RMI 只保证"**训练过的 key**"误差 ≤ E，但查询可能落在 gap 里（两段之间、或段内最后一个训练 key 之后）——低熵分布下 gap 极多，线性模型会无界外推（曾测到 `err.max ≈ 1.15e12`、越界率高达 47.8%）。修复：检测到 key 落在 gap 即回退到**段内二分**（段位置范围由 level-1 边界保证）。修复后三种分布 `err.max` 恒为 17（= E+1，即窗口边界）、**越界率恒为 0**，`lookup()` 对任意 key 逐位置精确。
+2. **模型复杂度与数据熵**：pieces 数量 uniform 349 < clustered 438 < zipf 638。**zipf 需要最多的线性段**——它头重脚轻，头部一个点一个斜率、尾部一马平川，贪心拟合用大量短段去逼近头部陡坡。这直接打脸"低熵数据=更好拟合=更少模型"的天真预期：**偏斜数据只是把复杂度从"数据本身"转移到"模型里"。**
+3. **延迟对分布几乎不敏感**：三种分布下 learned 都在 ~2.3 μs，说明瓶颈在 Python 解释器 + 调用链（路由、选段、窗口搜索），不在比较次数。这也解释了为什么实验 1 里它赢不了 bisect。
+4. 诚实结论：**分布敏感性实验的主要收获是正确性 bug 的暴露与修复**（gap 外推），性能结论与实验 1 一致——学习式索引的优势场景不在这台机器的内存整数点查上。
+
+### 实验 5：页路由视角（`run_benchmarks.py --block-sizes ...`）
+
+设定：回到 Kraska 2018 论文的原始主张——模型的任务是**定位页（block）**而非精确位置，页内再用小范围二分。`B` = 页内 key 数（32/64/128/256），`block_extra = (E+B)//B + 1 = 2` 保证候选页窗口必含真页。
+
+| 页大小 B | lookup ns | 预测页误差 max | 页越界率 | 模型+页偏移内存 |
+|---|---|---|---|---|
+| 32 | 3018 | 1 | **0.0** | 0.80 MB |
+| 64 | 3070 | 1 | **0.0** | 0.78 MB |
+| 128 | 3248 | 1 | **0.0** | 0.78 MB |
+| 256 | 3329 | 1 | **0.0** | 0.78 MB |
+| （参考）bisect | 1411 | — | — | 0.76 MB |
+
+**解读**：
+
+1. **页路由正确性成立**：预测页误差最大 1（因为位置误差 E+1=17 对 64-key 页最多跨 1 页），页越界率恒为 0——候选页窗口的选取公式在数学上是紧的。
+2. **延迟反而随 B 增大而变慢**（3018 → 3329 ns）。这与论文叙事相反：论文说"块定位省寻道"，但这是**磁盘/外存假设**——页越大、页内二分比较越多，而内存里页定位 + 页内二分的总比较次数（`log2(seg) + log2(2·B·extra+1)` 约为 13~16 次）本来就多于 plain bisect 的 ~16.6 次的理论下限没兑现、Python 常数还更高。
+3. 诚实结论：**页路由在"内存、Python、比较次数不是瓶颈"的环境里，恰好是论文优势条件最不成立的场景**。它的价值要等 cache-line 敏感的 C++ 实现 + 磁盘页寻道才显现——这本身就是重要的工程判断：**把论文结论迁移到自己的硬件/语言栈时必须重估假设。**
 
 ---
 

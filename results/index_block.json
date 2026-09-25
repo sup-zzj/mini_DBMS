@@ -1,0 +1,80 @@
+{
+  "meta": {
+    "n_keys": 100000,
+    "n_queries": 50000,
+    "seed": 42,
+    "distribution": "uniform",
+    "btree_order": 32,
+    "learned_level1": 64,
+    "key_space": 281474976710656,
+    "threshold": 16
+  },
+  "references": {
+    "sorted": {
+      "name": "sorted_array",
+      "lookup_ns": 1410.9,
+      "memory_bytes": 800000,
+      "comparisons": 16.61
+    },
+    "btree": {
+      "name": "btree",
+      "lookup_ns": 1909.4,
+      "memory_bytes": 2552744,
+      "height": 4,
+      "comparisons": 4.0
+    },
+    "learned_point": {
+      "name": "learned_e16",
+      "lookup_ns": 2456.5,
+      "memory_bytes": 809936,
+      "model_bytes": 9936,
+      "comparisons": 11.13
+    }
+  },
+  "block_sweep": [
+    {
+      "block_size": 32,
+      "block_extra": 2,
+      "lookup_ns": 3018.0,
+      "memory_bytes": 834936,
+      "model_bytes": 34936,
+      "pieces": 349,
+      "block_error_max": 1,
+      "block_over_frac": 0.0,
+      "comparisons": 13.32
+    },
+    {
+      "block_size": 64,
+      "block_extra": 2,
+      "lookup_ns": 3070.3,
+      "memory_bytes": 822440,
+      "model_bytes": 22440,
+      "pieces": 349,
+      "block_error_max": 1,
+      "block_over_frac": 0.0,
+      "comparisons": 14.32
+    },
+    {
+      "block_size": 128,
+      "block_extra": 2,
+      "lookup_ns": 3247.9,
+      "memory_bytes": 816192,
+      "model_bytes": 16192,
+      "pieces": 349,
+      "block_error_max": 1,
+      "block_over_frac": 0.0,
+      "comparisons": 15.32
+    },
+    {
+      "block_size": 256,
+      "block_extra": 2,
+      "lookup_ns": 3329.1,
+      "memory_bytes": 813064,
+      "model_bytes": 13064,
+      "pieces": 349,
+      "block_error_max": 1,
+      "block_over_frac": 0.0,
+      "comparisons": 16.32
+    }
+  ]
+}

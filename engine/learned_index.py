@@ -17,6 +17,17 @@ benchmarks:
 The index is **static** — it is built once over a fixed key set and only
 answers lookups.  Inserts are deliberately unsupported (documented
 limitation; a real learned index needs delta buffers / remapping).
+
+Exactness
+---------
+The greedy fit bounds the prediction error by ``threshold`` **only over the
+keys each piece was fitted on**.  A query key may fall in a *gap* — between
+two pieces, or after a piece's last trained key (skewed / clustered data
+produces many such gaps).  For those keys the linear model would extrapolate
+unboundedly, so lookups detect them and fall back to a segment-scoped
+``bisect`` (the true position of any key routed to a segment is provably
+inside ``[seg_starts[seg], seg_starts[seg+1]]``).  Lookups therefore stay
+exact for *every* key, trained or not.
 """
 
 from __future__ import annotations
@@ -65,6 +76,8 @@ class LearnedIndex:
         self._seg_starts: List[int] = []
         self._pieces: List[List[_Piece]] = []
         self._piece_keys: List[List[int]] = []  # cached piece start keys
+        self._piece_start_poss: List[List[int]] = []  # piece start positions
+        self._piece_last_poss: List[List[int]] = []  # last fitted position per piece
 
     # ------------------------------------------------------------------
     # building
@@ -78,10 +91,19 @@ class LearnedIndex:
         self._seg_starts = [(i * n) // s for i in range(s + 1)]
         self._pieces = []
         self._piece_keys = []
+        self._piece_start_poss = []
         for i in range(s):
             pieces = self._fit_pieces(self._seg_starts[i], self._seg_starts[i + 1])
             self._pieces.append(pieces)
             self._piece_keys.append([p.start_key for p in pieces])
+            self._piece_start_poss.append([p.start_pos for p in pieces])
+            # last trained position per piece: previous to the next piece's
+            # start, or the segment end for the final piece
+            seg_hi = self._seg_starts[i + 1]
+            self._piece_last_poss.append(
+                [pieces[k + 1].start_pos - 1 if k + 1 < len(pieces) else seg_hi - 1
+                 for k in range(len(pieces))]
+            )
         self._built = True
         return self
 
@@ -123,6 +145,54 @@ class LearnedIndex:
     # ------------------------------------------------------------------
     # lookups
     # ------------------------------------------------------------------
+    def _route_and_predict(self, key: int) -> int:
+        """Route ``key`` through both models and return a predicted position
+        whose error against the true insertion point is ``<= threshold + 1`` for
+        *every* key, not only the trained ones.
+
+        Keys that fall inside a fitted piece are interpolated (error bound by
+        ``threshold``).  Keys in a *gap* — between two adjacent pieces, or beyond
+        a piece's last trained key (skewed / clustered data produces many such
+        gaps) — would otherwise make the linear model extrapolate unboundedly, so
+        they fall back to a segment-scoped ``bisect``, return the exact position.
+        The raw prediction is also clamped to the selected piece's fitted position
+        span so it always points into a valid array region.
+        """
+        # level 1: route to a segment by boundary keys
+        seg = bisect.bisect_right(self._boundaries, key) - 1
+        if seg < 0:
+            seg = 0
+        elif seg >= len(self._pieces):
+            seg = len(self._pieces) - 1
+        lo_pos = self._seg_starts[seg]
+        hi_pos = self._seg_starts[seg + 1]
+        pieces = self._pieces[seg]
+        if not pieces:
+            return lo_pos
+        idx = max(0, bisect.bisect_right(self._piece_keys[seg], key) - 1)
+        # fitted key range of the selected piece
+        key_lo = self._piece_keys[seg][idx]
+        if idx + 1 < len(pieces):
+            key_hi = self._piece_keys[seg][idx + 1] - 1
+        else:
+            key_hi = int(self.keys[hi_pos - 1])
+        if key < key_lo or key > key_hi:
+            # gap key: fall back to the exact segment-scoped search
+            return bisect.bisect_left(self.keys, key, lo_pos, hi_pos)
+        piece = pieces[idx]
+        predicted = int(piece.start_pos + piece.slope * (key - piece.start_key))
+        pos_lo = self._piece_start_poss[seg][idx]
+        pos_hi = self._piece_last_poss[seg][idx]
+        return min(pos_hi, max(pos_lo, predicted))
+
+    def predict(self, key: int) -> int:
+        """Return the raw model-predicted insertion position of ``key``
+        (before the bounded exact search).  Exposed so benchmarks can measure
+        the prediction-error distribution ``|predict(key) - bisect(key)|``."""
+        if not self._built:
+            raise RuntimeError("call build() before predict()")
+        return self._route_and_predict(key)
+
     def lookup(self, key: int) -> int:
         """Return the insertion position of ``key`` (``keys[pos] >= key``),
         the same semantics as :func:`bisect.bisect_left`.
@@ -133,20 +203,7 @@ class LearnedIndex:
         if not self._built:
             raise RuntimeError("call build() before lookup()")
         keys = self.keys
-        # level 1: route to a segment by boundary keys
-        seg = bisect.bisect_right(self._boundaries, key) - 1
-        if seg < 0:
-            seg = 0
-        elif seg >= len(self._pieces):
-            seg = len(self._pieces) - 1
-        # level 2: pick a piece, predict, then correct with a bounded search
-        pieces = self._pieces[seg]
-        if pieces:
-            idx = bisect.bisect_right(self._piece_keys[seg], key) - 1
-            piece = pieces[max(0, idx)]
-            predicted = int(piece.start_pos + piece.slope * (key - piece.start_key))
-        else:
-            predicted = self._seg_starts[seg]
+        predicted = self._route_and_predict(key)
         lo = max(0, predicted - self.threshold - 1)
         hi = min(len(keys) - 1, predicted + self.threshold + 1)
         return bisect.bisect_left(keys, key, lo, hi + 1)
@@ -177,4 +234,84 @@ class LearnedIndex:
         return (
             f"LearnedIndex(keys={len(self.keys)}, segments={self.level1_size}, "
             f"pieces={n}, threshold={self.threshold})"
+        )
+
+
+class BlockLearnedIndex(LearnedIndex):
+    """A *block-routing* learned index: the model predicts the block (page)
+    a key lives in, then a small bounded search runs only inside that block's
+    candidate window.
+
+    This mirrors the setting where learned indexes are supposed to win (Kraska
+    et al., SIGMOD 2018): the model's job is to *locate the page*, avoiding a
+    full binary search that would walk many cache-line unfriendly pages, rather
+    than to pin-point the exact in-array position.
+
+    Exactness
+    ---------
+    The base RMI guarantees ``|predict - truth| <= threshold + 1``.  A key
+    whose true position is at offset ``truth`` lives in block
+    ``truth // block_size``.  If the predicted position ``p`` is in block
+    ``pb = p // block_size``, then the true block index differs from ``pb`` by
+    at most ``ceil((threshold + 1) / block_size)``.  Choosing
+    ``block_extra = (threshold + block_size) // block_size + 1`` therefore
+    guarantees the candidate block window always contains the true block, so
+    lookups stay exact.
+    """
+
+    def __init__(
+        self,
+        keys,
+        level1_size: int = 64,
+        threshold: int = 16,
+        block_size: int = 64,
+        block_extra: Optional[int] = None,
+    ) -> None:
+        super().__init__(keys, level1_size, threshold)
+        self.block_size = max(1, int(block_size))
+        if block_extra is None:
+            block_extra = (self.threshold + self.block_size) // self.block_size + 1
+        self.block_extra = max(0, int(block_extra))
+        self._nblocks: int = 0
+
+    def build(self) -> "BlockLearnedIndex":
+        super().build()
+        # ceil: include the final partial block so its keys are searchable
+        self._nblocks = (len(self.keys) + self.block_size - 1) // self.block_size
+        return self
+
+    def predict_block(self, key: int) -> int:
+        """Return the block the model predicts ``key`` lives in."""
+        if not self._built:
+            raise RuntimeError("call build() before predict_block()")
+        pred = self._route_and_predict(key)
+        pb = pred // self.block_size
+        return max(0, min(self._nblocks - 1, pb))
+
+    def lookup(self, key: int) -> int:
+        """Route to a predicted block, then run the exact ``bisect_left``
+        only inside the candidate block window that provably contains the key."""
+        if not self._built:
+            raise RuntimeError("call build() before lookup()")
+        keys = self.keys
+        pb = self.predict_block(key)
+        # Candidate block window [lo_b, hi_b]; the true block is guaranteed here.
+        lo_b = max(0, pb - self.block_extra)
+        hi_b = min(self._nblocks - 1, pb + self.block_extra)
+        lo = max(0, lo_b * self.block_size)
+        hi = min(len(keys) - 1, (hi_b + 1) * self.block_size - 1)
+        return bisect.bisect_left(keys, key, lo, hi + 1)
+
+    def memory_estimate(self) -> float:
+        base = super().memory_estimate()
+        if not self._built:
+            return base
+        return base + self._nblocks * _ITEM_BYTES  # block offsets
+
+    def __repr__(self) -> str:
+        n = sum(len(p) for p in self._pieces) if self._built else 0
+        return (
+            f"BlockLearnedIndex(keys={len(self.keys)}, segments={self.level1_size}, "
+            f"blocks={self._nblocks}, block_size={self.block_size}, "
+            f"block_extra={self.block_extra}, pieces={n}, threshold={self.threshold})"
         )

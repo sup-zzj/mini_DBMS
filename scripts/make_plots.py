@@ -32,6 +32,7 @@ COLORS = {
     "sorted_array": "#4C72B0",
     "btree": "#DD8452",
     "learned_e16": "#55A868",
+    "learned_block": "#8172B3",
     "lru": "#4C72B0",
     "clock": "#DD8452",
     "random": "#55A868",
@@ -127,6 +128,133 @@ def fig_index_benchmark(payload: dict) -> None:
     _save(fig, "fig_index_benchmark")
 
 
+def fig_index_distribution(payload: dict) -> None:
+    """Distribution sensitivity: latency / model pieces / prediction error per
+    key distribution."""
+    dists = [d["distribution"] for d in payload["per_dist"]]
+    x = range(len(dists))
+
+    fig, axes = plt.subplots(1, 3, figsize=(13, 4))
+
+    # (a) lookup latency per distribution, grouped by variant
+    ax = axes[0]
+    variant_names = [v["name"] for v in payload["per_dist"][0]["variants"]]
+    width = 0.2
+    for i, vn in enumerate(variant_names):
+        ys = [d["variants"][i]["lookup_ns"] for d in payload["per_dist"]]
+        ax.bar([xi + (i - 1.5) * width for xi in x], ys, width,
+               label=vn, color=COLORS[vn], alpha=0.85)
+        for xi, y in zip(x, ys):
+            ax.annotate(f"{y:.0f}", (xi + (i - 1.5) * width, y),
+                        textcoords="offset points", xytext=(0, 3),
+                        ha="center", fontsize=7)
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(dists)
+    ax.set_ylabel("lookup latency (ns / query)")
+    ax.set_title("Point-lookup latency vs. distribution")
+    ax.legend(loc="upper left", fontsize=8)
+
+    # (b) linear pieces (model size proxy).  The piece counts span less than
+    # 2x (349..638), so a log scale would compress the very difference we want
+    # to show; linear keeps 349 vs 638 visually honest.
+    ax = axes[1]
+    learned_i = variant_names.index("learned_e16")
+    block_i = variant_names.index("learned_block")
+    for i, vn in zip((learned_i, block_i), ("learned_e16", "learned_block")):
+        ys = [d["variants"][i].get("pieces", 0) for d in payload["per_dist"]]
+        ax.bar([xi + (i - 0.5) * width for xi in x], ys, width,
+               label=vn, color=COLORS[vn], alpha=0.85)
+        for xi, y in zip(x, ys):
+            ax.annotate(f"{y}", (xi + (i - 0.5) * width, y),
+                        textcoords="offset points", xytext=(0, 3),
+                        ha="center", fontsize=7)
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(dists)
+    ax.set_ylabel("linear pieces")
+    ax.set_title("Model size: pieces per distribution")
+    ax.legend(loc="upper left", fontsize=8)
+
+    # (c) prediction-error max vs. bound (single series: learned_e16)
+    ax = axes[2]
+    bound = payload["meta"].get("threshold", 16)
+    for i, d in enumerate(payload["per_dist"]):
+        li = d["variants"][2]
+        err = li.get("error", {})
+        ax.bar(i, err.get("max", 0), 0.5, label=d["distribution"],
+               color=COLORS["learned_e16"], alpha=0.85)
+        ax.annotate(f"p99={err.get('p99', 0)}", (i, err.get("max", 0)),
+                    textcoords="offset points", xytext=(0, 4),
+                    ha="center", fontsize=8)
+    ax.axhline(bound, color="black", linestyle="--", linewidth=1.2)
+    ax.text(len(dists) - 0.4, bound + 0.6, f"error bound E={bound}",
+            fontsize=8, ha="right")
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(dists)
+    ax.set_ylabel("max prediction error")
+    ax.set_title("Prediction error stays inside bound")
+    ax.set_ylim(0, max(bound * 2, 4))
+
+    fig.suptitle("Learned index: distribution sensitivity (uniform / clustered / zipf)",
+                 fontsize=12, y=1.02)
+    fig.tight_layout()
+    _save(fig, "fig_index_distribution")
+
+
+def fig_index_block(payload: dict) -> None:
+    """Block-routing sweep: latency / memory / comparisons / error bound vs.
+    block size."""
+    refs = payload["references"]
+    sweep = payload["block_sweep"]
+    bs = [s["block_size"] for s in sweep]
+
+    fig, axes = plt.subplots(1, 3, figsize=(13, 4))
+
+    # (a) lookup latency vs block size (with reference lines)
+    ax = axes[0]
+    ax.plot(bs, [s["lookup_ns"] for s in sweep], "o-",
+            color=COLORS["learned_block"], label="learned_block")
+    for name, ls, lab in (("sorted", "--", "sorted_array"),
+                          ("btree", "-.", "btree"),
+                          ("learned_point", ":", "learned_e16")):
+        ax.axhline(refs[name]["lookup_ns"], linestyle=ls,
+                   color=COLORS[lab], label=lab)
+    ax.set_xlabel("block size")
+    ax.set_ylabel("lookup latency (ns / query)")
+    ax.set_title("Block-routing: latency vs. block size")
+    ax.legend(loc="upper right", fontsize=8)
+
+    # (b) estimated comparisons per lookup
+    ax = axes[1]
+    ax.plot(bs, [s["comparisons"] for s in sweep], "s-",
+            color=COLORS["learned_block"], label="learned_block")
+    for name, ls, lab in (("sorted", "--", "sorted_array"),
+                          ("btree", "-.", "btree"),
+                          ("learned_point", ":", "learned_e16")):
+        ax.axhline(refs[name]["comparisons"], linestyle=ls,
+                   color=COLORS[lab], label=lab)
+    ax.set_xlabel("block size")
+    ax.set_ylabel("estimated comparisons / lookup")
+    ax.set_title("Estimated comparisons vs. block size")
+    ax.legend(loc="upper right", fontsize=8)
+
+    # (c) memory vs block size (model bytes only)
+    ax = axes[2]
+    ax.plot(bs, [s["model_bytes"] for s in sweep], "o-",
+            color=COLORS["learned_block"], label="model bytes")
+    ax.set_xlabel("block size")
+    ax.set_ylabel("model memory (bytes)")
+    ax.set_title("Block-routing: model memory vs. block size")
+    ax.annotate(f"max block error = {max(s['block_error_max'] for s in sweep)}",
+                xy=(0.02, 0.95), xycoords="axes fraction", fontsize=9,
+                va="top", ha="left")
+
+    fig.suptitle("Learned index: block-routing sweep "
+                 f"({payload['meta'].get('distribution', 'uniform')} keys)",
+                 fontsize=12, y=1.02)
+    fig.tight_layout()
+    _save(fig, "fig_index_block")
+
+
 def fig_buffer_pool(payload: dict) -> None:
     hit = payload["hit_ratio"]
     caps = [int(c) for c in hit["lru"]]
@@ -151,6 +279,8 @@ def fig_buffer_pool(payload: dict) -> None:
 def main() -> int:
     idx_path = os.path.join(RESULTS, "index_benchmark.json")
     buf_path = os.path.join(RESULTS, "buffer_pool_benchmark.json")
+    dist_path = os.path.join(RESULTS, "index_distribution.json")
+    block_path = os.path.join(RESULTS, "index_block.json")
     missing = [p for p in (idx_path, buf_path) if not os.path.exists(p)]
     if missing:
         print("missing benchmark results; run the benchmark scripts first:")
@@ -164,6 +294,21 @@ def main() -> int:
     print("fig_buffer_pool:")
     with open(buf_path, encoding="utf-8") as fh:
         fig_buffer_pool(json.load(fh))
+
+    if os.path.exists(dist_path):
+        print("fig_index_distribution:")
+        with open(dist_path, encoding="utf-8") as fh:
+            fig_index_distribution(json.load(fh))
+    else:
+        print("  (skip: index_distribution.json missing; run "
+              "`run_benchmarks.py --distribution uniform clustered zipf`)")
+    if os.path.exists(block_path):
+        print("fig_index_block:")
+        with open(block_path, encoding="utf-8") as fh:
+            fig_index_block(json.load(fh))
+    else:
+        print("  (skip: index_block.json missing; run "
+              "`run_benchmarks.py --block-sizes 32 64 128 256`)")
     return 0
 
 
